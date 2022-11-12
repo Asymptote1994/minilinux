@@ -18,6 +18,27 @@ Copyright © zuozhongkai Co., Ltd. 1998-2019. All rights reserved.
 #include "bsp_uart.h"
 #include "stdio.h"
 
+void function1(void);
+void function2(void);
+
+void function1(void)
+{
+	while (1) {
+		printf("this is %s\r\n", __func__);
+		delayms(200);
+		__switch_to(function2);
+	}
+}
+
+void function2(void)
+{
+	while (1) {
+		printf("this is %s\r\n", __func__);
+		delayms(200);
+		__switch_to(function1);
+	}
+}
+
 /*
  * @description	: main函数
  * @param 		: 无
@@ -25,9 +46,6 @@ Copyright © zuozhongkai Co., Ltd. 1998-2019. All rights reserved.
  */
 int main(void)
 {
-	unsigned char state = OFF;
-	int a , b;
-
 	int_init(); 				/* 初始化中断(一定要最先调用！) */
 	imx6u_clkinit();			/* 初始化系统时钟 			*/
 	delay_init();				/* 初始化延时 			*/
@@ -36,15 +54,7 @@ int main(void)
 	beep_init();				/* 初始化beep	 		*/
 	uart_init();				/* 初始化串口，波特率115200 */
 	
-	while(1)					
-	{	
-		printf("输入两个整数，使用空格隔开:");
-		scanf("%d %d", &a, &b);					 		/* 输入两个整数 */
-		printf("\r\n数据%d + %d = %d\r\n\r\n", a, b, a+b);	/* 输出两个数相加的和 */
-
-		state = !state;
-		led_switch(LED0,state);
-	}
+	__switch_to(function1);
 
 	return 0;
 }

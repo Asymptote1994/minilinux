@@ -164,3 +164,7 @@ FIQ_Handler:
 	ldr r0, =FIQ_Handler	
 	bx r0									
 
+.global __switch_to
+.type __switch_to function
+__switch_to:
+	mov pc, r0
