@@ -18,24 +18,59 @@ Copyright © zuozhongkai Co., Ltd. 1998-2019. All rights reserved.
 #include "bsp_uart.h"
 #include "stdio.h"
 
+#define __u32 unsigned int
+
+struct cpu_context_save {
+	__u32	r4;
+	__u32	r5;
+	__u32	r6;
+	__u32	r7;
+	__u32	r8;
+	__u32	r9;
+	__u32	sl;
+	__u32	fp;
+	__u32	sp;
+	__u32	pc;
+	__u32	extra[2];		/* Xscale 'acc' register, etc */
+};
+
+struct thread_info {
+	struct cpu_context_save	cpu_context;	/* cpu context */
+};
+
+struct task_struct {
+	struct thread_info		thread_info;
+};
+
+struct task_struct task1;
+struct task_struct task2;
+
 void function1(void);
 void function2(void);
 
 void function1(void)
 {
+	printf("enter %s\r\n", __func__);
+
 	while (1) {
 		printf("this is %s\r\n", __func__);
 		delayms(200);
-		__switch_to(function2);
+		printf("%s(): before __switch_to\r\n", __func__);
+		__switch_to(&task1, &task2);
+		printf("%s(): after  __switch_to\r\n", __func__);
 	}
 }
 
 void function2(void)
 {
+	printf("enter %s\r\n", __func__);
+
 	while (1) {
 		printf("this is %s\r\n", __func__);
 		delayms(200);
-		__switch_to(function1);
+		printf("%s(): before __switch_to\r\n", __func__);
+		__switch_to(&task2, &task1);
+		printf("%s(): after  __switch_to\r\n", __func__);
 	}
 }
 
@@ -54,7 +89,12 @@ int main(void)
 	beep_init();				/* 初始化beep	 		*/
 	uart_init();				/* 初始化串口，波特率115200 */
 	
-	__switch_to(function1);
+	task1.thread_info.cpu_context.sp = 0x90000000;
+	task2.thread_info.cpu_context.sp = 0x91000000;
+	task1.thread_info.cpu_context.pc = function1;
+	task2.thread_info.cpu_context.pc = function2;
+
+	function1();
 
 	return 0;
 }

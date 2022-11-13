@@ -167,4 +167,7 @@ FIQ_Handler:
 .global __switch_to
 .type __switch_to function
 __switch_to:
-	mov pc, r0
+	add	ip, r0, #0
+	stmia	ip!, {r4 - sl, fp, sp, lr}	@ Store most regs on stack
+	add	r4, r1, #0
+	ldmia	r4, {r4 - sl, fp, sp, pc}	@ Load all regs saved previously
