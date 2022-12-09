@@ -62,6 +62,7 @@ void epit1_irqhandler(void)
 	if(EPIT1->SR & (1<<0)) 			/* 判断比较事件发生 */
 	{
 		led_switch(LED0, state); 	/* 定时器周期到，反转LED */
+		// printf("this is %s, state = %d\r\n", __func__, state);
 	}
 	
 	EPIT1->SR |= 1<<0; 				/* 清除中断标志位 */

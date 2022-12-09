@@ -1,14 +1,3 @@
-/**************************************************************
-Copyright © zuozhongkai Co., Ltd. 1998-2019. All rights reserved.
-文件名	: 	 mian.c
-作者	   : 左忠凯
-版本	   : V1.0
-描述	   : I.MX6U开发板裸机实验14 串口print实验
-其他	   : 本实验在串口上移植printf，实现printf函数功能，方便以后的
-		 程序调试。
-论坛 	   : www.wtmembed.com
-日志	   : 初版V1.0 2019/1/15 左忠凯创建
-**************************************************************/
 #include "bsp_clk.h"
 #include "bsp_delay.h"
 #include "bsp_led.h"
@@ -36,51 +25,91 @@ struct cpu_context_save {
 
 struct thread_info {
 	struct cpu_context_save	cpu_context;	/* cpu context */
+	struct task_struct	*task;		/* main task structure */
 };
 
 struct task_struct {
 	struct thread_info		thread_info;
 };
 
-struct task_struct task1;
-struct task_struct task2;
+#define THREAD_SIZE			 4096
+
+/*
+ * how to get the current stack pointer in C
+ */
+register unsigned long current_stack_pointer asm ("sp");
+
+/*
+ * how to get the thread information struct from C
+ */
+// static inline struct thread_info *current_thread_info(void) __attribute_const__;
+
+static struct thread_info *current_thread_info(void)
+{
+	return (struct thread_info *)
+		(current_stack_pointer & ~(THREAD_SIZE - 1));
+}
+
+#define get_current() (current_thread_info()->task)
+#define current get_current()
+
+void print_task(void)
+{
+	printf("current_stack_pointer = 0x%x\r\n", current_stack_pointer);
+	printf("current_thread_info   = 0x%x\r\n", current_thread_info());
+	printf("current_task_struct   = 0x%x\r\n", current);
+}
+
+struct task_struct *task1 = 0x90000000;
+struct task_struct *task2 = 0x91000000;
 
 void function1(void);
 void function2(void);
 
 void function1(void)
 {
-	printf("enter %s\r\n", __func__);
+	printf("################### enter %s ###################\r\n", __func__);
 
 	while (1) {
-		printf("this is %s\r\n", __func__);
+		printf("++++++++ this is %s , step 1 ++++++++\r\n", __func__);
 		delayms(200);
-		printf("%s(): before __switch_to\r\n", __func__);
-		__switch_to(&task1, &task2);
-		printf("%s(): after  __switch_to\r\n", __func__);
+		printf("++++++++ this is %s , step 2 ++++++++\r\n", __func__);
+		delayms(200);
+		printf("++++++++ this is %s , step 3 ++++++++\r\n", __func__);
 	}
 }
 
 void function2(void)
 {
-	printf("enter %s\r\n", __func__);
+	printf("################### enter %s ###################\r\n", __func__);
 
 	while (1) {
-		printf("this is %s\r\n", __func__);
+		printf("++++++++ this is %s , step 1 ++++++++\r\n", __func__);
 		delayms(200);
-		printf("%s(): before __switch_to\r\n", __func__);
-		__switch_to(&task2, &task1);
-		printf("%s(): after  __switch_to\r\n", __func__);
+		printf("++++++++ this is %s , step 2 ++++++++\r\n", __func__);
+		delayms(200);
+		printf("++++++++ this is %s , step 3 ++++++++\r\n", __func__);
 	}
 }
 
-/*
- * @description	: main函数
- * @param 		: 无
- * @return 		: 无
- */
+void do_work_pending(void)
+{
+	static unsigned char state = 1;
+
+	state = !state;
+	printf("============ this is %s, state = %d ============\r\n", __func__, state);
+
+	if (state) {
+		__switch_to(current, task1);
+	} else {
+		__switch_to(current, task2);
+	}
+}
+
 int main(void)
 {
+	struct task_struct *unused_task;
+
 	int_init(); 				/* 初始化中断(一定要最先调用！) */
 	imx6u_clkinit();			/* 初始化系统时钟 			*/
 	delay_init();				/* 初始化延时 			*/
@@ -88,13 +117,18 @@ int main(void)
 	led_init();					/* 初始化led 			*/
 	beep_init();				/* 初始化beep	 		*/
 	uart_init();				/* 初始化串口，波特率115200 */
-	
-	task1.thread_info.cpu_context.sp = 0x90000000;
-	task2.thread_info.cpu_context.sp = 0x91000000;
-	task1.thread_info.cpu_context.pc = function1;
-	task2.thread_info.cpu_context.pc = function2;
+	epit1_init(0, 66000000 / 2);		/* 初始化EPIT1定时器，1分频，计数值为:66000000/2，也就是定时周期为500ms */                
 
-	function1();
+	task1->thread_info.cpu_context.sp = (unsigned int)task1 + THREAD_SIZE;
+	task2->thread_info.cpu_context.sp = (unsigned int)task2 + THREAD_SIZE;
+	
+	task1->thread_info.cpu_context.pc = function1;
+	task2->thread_info.cpu_context.pc = function2;
+
+	task1->thread_info.task = task1;
+	task2->thread_info.task = task2;
+
+	__switch_to(&unused_task, task1);
 
 	return 0;
 }

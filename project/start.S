@@ -120,50 +120,22 @@ NotUsed_Handler:
 	bx r0
 
 /* IRQ中断！重点！！！！！ */
-IRQ_Handler:
-	push {lr}					/* 保存lr地址 */
-	push {r0-r3, r12}			/* 保存r0-r3，r12寄存器 */
+@ #include "../include/linkage.h"
 
-	mrs r0, spsr				/* 读取spsr寄存器 */
-	push {r0}					/* 保存spsr寄存器 */
+#define SVC_MODE	0x00000013
+#define IRQ_MODE	0x00000012
+#define PSR_ISETSTATE	0
+#define PT_REGS_SIZE	(4 * 18)
+#define SVC_REGS_SIZE	(4 * 20)
+#define S_PC	(4 * 15)
+#define S_PSR	(4 * 16)
+#define S_SP	(4 * 13)
 
-	mrc p15, 4, r1, c15, c0, 0 /* 从CP15的C0寄存器内的值到R1寄存器中
-								* 参考文档ARM Cortex-A(armV7)编程手册V4.0.pdf P49
-								* Cortex-A7 Technical ReferenceManua.pdf P68 P138
-								*/							
-	add r1, r1, #0X2000			/* GIC基地址加0X2000，也就是GIC的CPU接口端基地址 */
-	ldr r0, [r1, #0XC]			/* GIC的CPU接口端基地址加0X0C就是GICC_IAR寄存器，
-								 * GICC_IAR寄存器保存这当前发生中断的中断号，我们要根据
-								 * 这个中断号来绝对调用哪个中断服务函数
-								 */
-	push {r0, r1}				/* 保存r0,r1 */
-	
-	cps #0x13					/* 进入SVC模式，允许其他中断再次进去 */
-	
-	push {lr}					/* 保存SVC模式的lr寄存器 */
-	ldr r2, =system_irqhandler	/* 加载C语言中断处理函数到r2寄存器中*/
-	blx r2						/* 运行C语言中断处理函数，带有一个参数，保存在R0寄存器中 */
-
-	pop {lr}					/* 执行完C语言中断服务函数，lr出栈 */
-	cps #0x12					/* 进入IRQ模式 */
-	pop {r0, r1}				
-	str r0, [r1, #0X10]			/* 中断执行完成，写EOIR */
-
-	pop {r0}						
-	msr spsr_cxsf, r0			/* 恢复spsr */
-
-	pop {r0-r3, r12}			/* r0-r3,r12出栈 */
-	pop {lr}					/* lr出栈 */
-	subs pc, lr, #4				/* 将lr-4赋给pc */
-	
-	
-
-/* FIQ中断 */
-FIQ_Handler:
-
-	ldr r0, =FIQ_Handler	
-	bx r0									
-
+/*
+ * Register switch for ARMv3 and ARMv4 processors
+ * r0 = previous task_struct, r1 = previous thread_info, r2 = next thread_info
+ * previous and next are guaranteed not to be the same.
+ */
 .global __switch_to
 .type __switch_to function
 __switch_to:
@@ -171,3 +143,174 @@ __switch_to:
 	stmia	ip!, {r4 - sl, fp, sp, lr}	@ Store most regs on stack
 	add	r4, r1, #0
 	ldmia	r4, {r4 - sl, fp, sp, pc}	@ Load all regs saved previously
+
+/*
+ *	macro svc_entry
+ */
+	.macro	svc_entry, stack_hole=0, trace=1, uaccess=1
+	sub	sp, sp, #(SVC_REGS_SIZE + \stack_hole - 4)
+	stmia	sp, {r1 - r12}
+
+	ldmia	r0, {r3 - r5}
+	add	r7, sp, #S_SP - 4	@ here for interlock avoidance
+	mov	r6, #-1			@  ""  ""      ""       ""
+	add	r2, sp, #(SVC_REGS_SIZE + \stack_hole - 4)
+	str	r3, [sp, #-4]!		@ save the "real" r0 copied
+					@ from the exception stack
+
+	mov	r3, lr
+
+	@
+	@ We are now ready to fill in the remaining blanks on the stack:
+	@
+	@  r2 - sp_svc
+	@  r3 - lr_svc
+	@  r4 - lr_<exception>, already fixed up for correct return/restart
+	@  r5 - spsr_<exception>
+	@  r6 - orig_r0 (see pt_regs definition in ptrace.h)
+	@
+	stmia	r7, {r2 - r6}
+	.endm
+
+/*
+ *	macro irq_handler
+ */
+/*
+ * Interrupt handling.
+ */
+	.macro	irq_handler
+@ #ifdef CONFIG_GENERIC_IRQ_MULTI_HANDLER
+@ 	ldr	r1, =handle_arch_irq
+@ 	mov	r0, sp
+@ 	badr	lr, 9997f
+@ 	ldr	pc, [r1]
+@ #else
+@ 	arch_irq_handler_default
+@ #endif
+@ 9997:
+	bl system_irqhandler
+	.endm
+
+/*
+ *	macro svc_exit
+ */
+	.macro	svc_exit, rpsr, irq = 0
+	@ .if	\irq != 0
+	@ @ IRQs already off
+	@ .else
+	@ @ IRQs off again before pulling preserved data off the stack
+	@ disable_irq_notrace
+	@ .endif
+
+	@ ARM mode SVC restore
+	msr	spsr_cxsf, \rpsr
+	ldmia	sp, {r0 - pc}^			@ load r0 - pc, cpsr
+	.endm
+
+/*
+ *	macro vector_stub
+ */
+	.macro	vector_stub, name, mode, correction=0
+	.align	5
+
+vector_\name:
+	.if \correction
+	sub	lr, lr, #\correction
+	.endif
+
+	@
+	@ Save r0, lr_<exception> (parent PC) and spsr_<exception>
+	@ (parent CPSR)
+	@
+	stmia	sp, {r0, lr}		@ save r0, lr
+	mrs	lr, spsr
+	str	lr, [sp, #8]		@ save spsr
+
+	@
+	@ Prepare for SVC32 mode.  IRQs remain disabled.
+	@
+	mrs	r0, cpsr
+	eor	r0, r0, #(IRQ_MODE ^ SVC_MODE)
+	msr	spsr_cxsf, r0
+
+	@
+	@ the branch table must immediately follow this code
+	@
+	and	lr, lr, #0x0f
+	mov	r0, sp
+ 	ldr	lr, [pc, lr, lsl #2]
+	movs	pc, lr			@ branch to handler in SVC mode
+
+	@ ldr r0, =__irq_svc
+	@ movs pc, r0
+	@ cps #0x13					/* 进入SVC模式，允许其他中断再次进去 */
+
+	.align	2
+	@ handler addresses follow this label
+1:
+	.endm
+IRQ_Handler:
+	/* 执行到这里之前:
+	 * 1. lr_irq保存有被中断模式中的下一条即将执行的指令的地址
+	 * 2. SPSR_irq保存有被中断模式的CPSR
+	 * 3. CPSR中的M4-M0被设置为10010, 进入到irq模式
+	 * 4. 跳到0x18的地方执行程序 
+	 */
+
+	/* 保存现场 */
+	/* 在irq异常处理函数中有可能会修改r0-r12, 所以先保存 */
+	/* lr-4是异常处理完后的返回地址, 也要保存 */
+	@ sub lr, lr, #4
+	@ stmdb sp!, {r0-r12, lr}  
+	
+	@ /* 处理irq异常 */
+	@ bl system_irqhandler
+	@ bl do_work_pending
+	@ /* 恢复现场 */
+	@ ldmia sp!, {r0-r12, pc}^  /* ^会把spsr_irq的值恢复到cpsr里 */	
+
+/*
+ * Interrupt dispatcher
+ */
+	vector_stub	irq, IRQ_MODE, 4
+
+	.long	__irq_usr			@  0  (USR_26 / USR_32)
+	.long	__irq_invalid			@  1  (FIQ_26 / FIQ_32)
+	.long	__irq_invalid			@  2  (IRQ_26 / IRQ_32)
+	.long	__irq_svc			@  3  (SVC_26 / SVC_32)
+	.long	__irq_invalid			@  4
+	.long	__irq_invalid			@  5
+	.long	__irq_invalid			@  6
+	.long	__irq_invalid			@  7
+	.long	__irq_invalid			@  8
+	.long	__irq_invalid			@  9
+	.long	__irq_invalid			@  a
+	.long	__irq_invalid			@  b
+	.long	__irq_invalid			@  c
+	.long	__irq_invalid			@  d
+	.long	__irq_invalid			@  e
+	.long	__irq_invalid			@  f
+
+__irq_svc:
+	svc_entry
+	irq_handler
+
+	/* 使能IRQ中断 */
+	mrs r0, cpsr		/* 读取cpsr寄存器值到r0中 			*/
+	bic r0, r0, #0x80	/* 将r0寄存器中bit7清零，也就是CPSR中的I位清零，表示允许IRQ中断 */
+	msr cpsr, r0		/* 将r0重新写入到cpsr中 			*/
+	bl do_work_pending
+
+	svc_exit r5, irq = 1			@ return from exception
+
+__irq_usr:
+	b __irq_usr
+
+__irq_invalid:
+	b __irq_invalid
+
+/* FIQ中断 */
+FIQ_Handler:
+
+	ldr r0, =FIQ_Handler	
+	bx r0									

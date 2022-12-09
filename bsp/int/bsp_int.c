@@ -58,6 +58,15 @@ void system_register_irqhandler(IRQn_Type irq, system_irq_handler_t handler, voi
   	irqTable[irq].userParam = userParam;
 }
 
+GIC_Type *get_gic_base(void)
+{
+	GIC_Type *dst;
+
+	__asm volatile ("mrc p15, 4, %0, c15, c0, 0" : "=r" (dst)); 
+
+	return dst;
+}
+
 /*
  * @description			: C语言中断服务函数，irq汇编中断服务函数会
  						  调用此函数，此函数通过在中断服务列表中查
@@ -67,7 +76,24 @@ void system_register_irqhandler(IRQn_Type irq, system_irq_handler_t handler, voi
  */
 void system_irqhandler(unsigned int giccIar) 
 {
+	int nr;
+	GIC_Type *gic = get_gic_base();
 
+	/* The processor reads GICC_IAR to obtain the interrupt ID of the
+	 * signaled interrupt. This read acts as an acknowledge for the interrupt
+	 */
+	nr = gic->C_IAR;
+	// printf("irq %d is happened\r\n", nr);
+	
+	/* 根据传递进来的中断号，在irqTable中调用确定的中断服务函数*/
+	irqTable[nr].irqHandler(nr, irqTable[nr].userParam);
+
+	/* write GICC_EOIR inform the CPU interface that it has completed 
+	 * the processing of the specified interrupt 
+	 */
+	gic->C_EOIR = nr;
+
+#if 0
    uint32_t intNum = giccIar & 0x3FFUL;
    
    /* 检查中断号是否符合要求 */
@@ -82,7 +108,7 @@ void system_irqhandler(unsigned int giccIar)
    irqTable[intNum].irqHandler(intNum, irqTable[intNum].userParam);
  
    irqNesting--;	/* 中断执行完成，中断嵌套寄存器减一 */
-
+#endif
 }
 
 /*
