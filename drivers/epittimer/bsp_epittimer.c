@@ -11,6 +11,7 @@ Copyright © zuozhongkai Co., Ltd. 1998-2019. All rights reserved.
 #include <epittimer.h>
 #include <int.h>
 #include <led.h>
+#include <sched.h>
 
 /*
  * @description		: 初始化EPIT定时器.
@@ -62,7 +63,11 @@ void epit1_irqhandler(void)
 	if(EPIT1->SR & (1<<0)) 			/* 判断比较事件发生 */
 	{
 		led_switch(LED0, state); 	/* 定时器周期到，反转LED */
-		// printf("this is %s, state = %d\r\n", __func__, state);
+		printf("############ %s(): %d, current->counter = %d #############\r\n", __func__, state, current->counter);
+		if (current->counter > 0)
+			current->counter--;			// 如果进程运行时间还没完，则退出。
+		else
+			current->counter = 0;
 	}
 	
 	EPIT1->SR |= 1<<0; 				/* 清除中断标志位 */

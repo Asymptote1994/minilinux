@@ -139,9 +139,9 @@ NotUsed_Handler:
 .global __switch_to
 .type __switch_to function
 __switch_to:
-	add	ip, r0, #0
+	add	ip, r1, #0
 	stmia	ip!, {r4 - sl, fp, sp, lr}	@ Store most regs on stack
-	add	r4, r1, #0
+	add	r4, r2, #0
 	ldmia	r4, {r4 - sl, fp, sp, pc}	@ Load all regs saved previously
 
 /*

@@ -28,6 +28,7 @@ TARGET := kernel.bin
 
 
 obj-y += init/
+obj-y += kernel/
 obj-y += drivers/
 obj-y += lib/
 
