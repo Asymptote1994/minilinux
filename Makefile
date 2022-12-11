@@ -1,71 +1,53 @@
-CROSS_COMPILE 	?= arm-linux-gnueabihf-
-TARGET		  	?= printf
+CROSS_COMPILE = arm-linux-gnueabihf-
 
-CC 				:= $(CROSS_COMPILE)gcc
-LD				:= $(CROSS_COMPILE)ld
-OBJCOPY 		:= $(CROSS_COMPILE)objcopy
-OBJDUMP 		:= $(CROSS_COMPILE)objdump
+AS		= $(CROSS_COMPILE)as
+LD		= $(CROSS_COMPILE)ld
+CC		= $(CROSS_COMPILE)gcc
+CPP		= $(CC) -E
+AR		= $(CROSS_COMPILE)ar
+NM		= $(CROSS_COMPILE)nm
 
-LIBPATH			:= -lgcc -L /usr/local/arm/gcc-linaro-4.9.4-2017.01-x86_64_arm-linux-gnueabihf/lib/gcc/arm-linux-gnueabihf/4.9.4
+STRIP		= $(CROSS_COMPILE)strip
+OBJCOPY		= $(CROSS_COMPILE)objcopy
+OBJDUMP		= $(CROSS_COMPILE)objdump
+
+export AS LD CC CPP AR NM
+export STRIP OBJCOPY OBJDUMP
+
+CFLAGS = -g -Wall -Wa,-mimplicit-it=thumb -nostdlib -fno-builtin -c -O2 -I$(shell pwd)/include
+LDFLAGS = -lgcc -L /home/zhangxu/study/imx6ull/cross_compiler/gcc-linaro-4.9.4-2017.01-x86_64_arm-linux-gnueabihf/lib/gcc/arm-linux-gnueabihf/4.9.4
+# LDFLAGS =
+OBJCOPYFLAGS =
+
+export CFLAGS LDFLAGS
+
+TOPDIR := $(shell pwd)
+export TOPDIR
+
+TARGET := kernel.bin
 
 
-INCDIRS 		:= imx6ul \
-				   stdio/include \
-				   bsp/clk \
-				   bsp/led \
-				   bsp/delay  \
-				   bsp/beep \
-				   bsp/gpio \
-				   bsp/key \
-				   bsp/exit \
-				   bsp/int \
-				   bsp/epittimer \
-				   bsp/keyfilter \
-				   bsp/uart 
-				   			   
-SRCDIRS			:= project \
-				   stdio/lib \
-				   bsp/clk \
-				   bsp/led \
-				   bsp/delay \
-				   bsp/beep \
-				   bsp/gpio \
-				   bsp/key \
-				   bsp/exit \
-				   bsp/int \
-				   bsp/epittimer \
-				   bsp/keyfilter \
-				   bsp/uart 
-				   
-				   
-INCLUDE			:= $(patsubst %, -I %, $(INCDIRS))
+obj-y += init/
+obj-y += drivers/
+obj-y += lib/
 
-SFILES			:= $(foreach dir, $(SRCDIRS), $(wildcard $(dir)/*.S))
-CFILES			:= $(foreach dir, $(SRCDIRS), $(wildcard $(dir)/*.c))
 
-SFILENDIR		:= $(notdir  $(SFILES))
-CFILENDIR		:= $(notdir  $(CFILES))
+all : 
+	make -C ./ -f $(TOPDIR)/Makefile.build
 
-SOBJS			:= $(patsubst %, obj/%, $(SFILENDIR:.S=.o))
-COBJS			:= $(patsubst %, obj/%, $(CFILENDIR:.c=.o))
-OBJS			:= $(SOBJS) $(COBJS)
+	$(LD) -T kernel.lds -o kernel.elf built-in.o $(LDFLAGS)
+	$(OBJCOPY) $(OBJCOPYFLAGS) -O binary kernel.elf kernel.bin
+	$(OBJDUMP) -D -m arm kernel.elf > kernel.dis
 
-VPATH			:= $(SRCDIRS)
 
-.PHONY: clean
-	
-$(TARGET).bin : $(OBJS)
-	$(LD) -Timx6ul.lds -o $(TARGET).elf $^ $(LIBPATH)
-	$(OBJCOPY) -O binary -S $(TARGET).elf $@
-	$(OBJDUMP) -D -m arm $(TARGET).elf > $(TARGET).dis
-
-$(SOBJS) : obj/%.o : %.S
-	$(CC) -Wall -nostdlib -fno-builtin -c -O2  $(INCLUDE) -o $@ $<
-
-$(COBJS) : obj/%.o : %.c
-	$(CC) -Wall -Wa,-mimplicit-it=thumb -nostdlib -fno-builtin -c -O2  $(INCLUDE) -o $@ $<
-	
 clean:
-	rm -rf $(TARGET).elf $(TARGET).dis $(TARGET).bin $(COBJS) $(SOBJS)
+	rm -f $(shell find -name "*.o")
+	rm -f $(shell find -name "*.d")
+	rm -f $(shell find -name "*.bin")
+	rm -f $(shell find -name "*.elf")
+	rm -f $(shell find -name "*.dis")
 
+distclean:
+	rm -f $(shell find -name "*.o")
+	rm -f $(shell find -name "*.d")
 	
